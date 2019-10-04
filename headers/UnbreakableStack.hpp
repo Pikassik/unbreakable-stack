@@ -3,9 +3,7 @@
 #include <cxxabi.h>
 #include <cstdio>
 #include <string>
-#include <vector>
 #include <memory>
-#include <unistd.h>
 #include <cassert>
 #include <type_traits>
 
@@ -23,30 +21,16 @@
 
 enum : size_t {
   CANARY_POISON        = 0xDEADBEEFCACED426,
-  VALUE_POISON         = 0xDED1CDEAAAAAAAAD,
   DEFAULT_STORAGE_SIZE = 8,
-  MULTIPLIER           = 7
 };
-
-
-constexpr size_t ConstexprRandom() {
-  const char time[] = __TIME__;
-  size_t result = 0;
-  size_t multiplier = 1;
-  for (auto letter: time) {
-    result += multiplier * letter;
-    multiplier *= MULTIPLIER;
-  }
-
-  return result;
-}
 
 template <class T>
 struct DefaultPoison {
   std::string operator()() {
     std::string poison;
     for (size_t i = 0; i < sizeof(T); ++i) {
-      poison.push_back(static_cast<char>(i) == 0 ? 'a' : i % ('z' - 'a' + 1) + 'a');
+      poison.push_back(static_cast<char>(i) == 0 ?
+      'a' : i % ('z' - 'a' + 1) + 'a');
     }
     return poison;
   }
@@ -105,6 +89,7 @@ template<typename T,
 class UnbreakableStack<T, Static, DumpT, storage_size> {
  public:
   UnbreakableStack();
+
   void Push(const T& value);
   void Push(T&& value);
 
@@ -120,38 +105,34 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
   size_t begin_canary_                  = CANARY_POISON;
   size_t size_                          = 0;
   char char_buffer_[sizeof(T) * storage_size] = {};
-  T* buffer_                             = reinterpret_cast<T*>(&char_buffer_);
+  T* buffer_                            = reinterpret_cast<T*>(&char_buffer_);
   std::unique_ptr<size_t> check_sum_    = std::make_unique<size_t>(0);
   size_t end_canary_                    = CANARY_POISON;
-  bool Ok();
-  void Dump(const char* filename,
-            int line,
-            const char* function_name);
+  bool Ok() const noexcept;
+  void Dump(const char* filename, int line, const char* function_name) const;
   size_t CalculateCheckSum() const;
 };
 
 template<typename T,
          typename DumpT,
          size_t storage_size>
-void UnbreakableStack<T,
-                      Static,
-                      DumpT,
-                      storage_size>::Push(const T& value) {
+void UnbreakableStack<T, Static, DumpT, storage_size>::Push(const T& value) {
+  assert(&value != nullptr);
   VERIFIED(Ok());
-  assert(size_ != storage_size || (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
+  assert(size_ != storage_size ||
+  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
   new (reinterpret_cast<char*>(buffer_ + size_)) T(value);
   ++size_;
+#ifndef NDEBUG
   *check_sum_ = CalculateCheckSum();
+#endif
   VERIFIED(Ok());
 }
 
 template<typename T,
          typename DumpT,
          size_t storage_size>
-UnbreakableStack<T,
-                 Static,
-                 DumpT,
-                 storage_size>::UnbreakableStack() {
+UnbreakableStack<T, Static, DumpT, storage_size>::UnbreakableStack() {
 #ifndef NDEBUG
   std::string poison = DefaultPoison<T>()();
   for (size_t i = 0; i < storage_size; ++i) {
@@ -166,25 +147,18 @@ UnbreakableStack<T,
 template<typename T,
          typename DumpT,
          size_t storage_size>
-size_t  UnbreakableStack<T,
-                         Static,
-                         DumpT,
-                         storage_size>::CalculateCheckSum() const {
+size_t  UnbreakableStack<T, Static,
+DumpT, storage_size>::CalculateCheckSum() const {
   return reinterpret_cast<size_t>(this) +
-  std::hash<std::string>()(std::string(reinterpret_cast<const char*>(this),
-                                       sizeof(UnbreakableStack<T,
-                                                               Static,
-                                                               DumpT,
-                                                               storage_size>)));
+  std::hash<std::string_view>()(
+      std::string_view(reinterpret_cast<const char*>(this),
+                     sizeof(UnbreakableStack<T, Static, DumpT, storage_size>)));
 }
 
 template<typename T,
          typename DumpT,
          size_t storage_size>
-bool UnbreakableStack<T,
-                      Static,
-                      DumpT,
-                      storage_size>::Ok() {
+bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() const noexcept {
 
   if (this                == nullptr)             return false;
   if (begin_canary_       != CANARY_POISON)       return false;
@@ -205,73 +179,81 @@ bool UnbreakableStack<T,
 template<typename T,
          typename DumpT,
          size_t storage_size>
-void UnbreakableStack<T,
-                      Static,
-                      DumpT,
-                      storage_size>::Dump(const char* filename,
-                                          int line,
-                                          const char* function_name) {
+void UnbreakableStack<T, Static, DumpT, storage_size>::
+    Dump(const char* filename, int line, const char* function_name) const {
   std::printf(
       "Ok failed! from %s (%d)\n%s:\n", filename, line, function_name
       );
+  fflush(stdin);
   std::printf(
       "UnbreakableStack<T, StorageType, storage_size> with [T = %s; "
       "StorageType = Static; size_t storage_size = %llu] [%p] (%s) {\n",
       abi::__cxa_demangle(typeid(T).name(), nullptr, nullptr, nullptr),
       storage_size, this, this == nullptr ? "ERROR" : "Ok"
       );
+  fflush(stdin);
   if (!this) {
     std::printf(
       "}\n"
       );
     return;
   }
+  fflush(stdin);
   std::printf(
       "    errno = %d (%s)\n", errno, errno != 0 ? "ERROR" : "Ok"
       );
+  fflush(stdin);
   printf(
-      "    size_t begin_canary = %llu (%s)\n", begin_canary_, begin_canary_ != CANARY_POISON ? "ERROR" : "Ok"
+      "    size_t begin_canary = %llu (%s)\n", begin_canary_,
+      begin_canary_ != CANARY_POISON ? "ERROR" : "Ok"
       );
+  fflush(stdin);
   std::printf(
-      "    size_t size_ = %llu (%s)\n", size_, size_ >= storage_size ? (size_ == storage_size ? "Full" : "OVERFLOW") : "Ok"
+      "    size_t size_ = %llu (%s)\n", size_, size_ >= storage_size ?
+      (size_ == storage_size ? "Full" : "OVERFLOW") : "Ok"
       );
+  fflush(stdin);
   std::printf(
       "    char[] char_buffer_[%llu] [%p] =\n", storage_size, &char_buffer_
       );
+  fflush(stdin);
   for (size_t i = 0; i < size_; ++i) {
     std::printf(
       "       *[%llu] = %s\n", i, DumpT()(buffer_[i]).c_str()
       );
+    fflush(stdin);
   }
   for (size_t i = size_; i < storage_size; ++i) {
-    std::string value =
-        std::string(reinterpret_cast<const char*>(&buffer_[i]), sizeof(T));
-    if (value == DefaultPoison<T>()()) {
       printf(
-      "        [%llu] = %s (%s)\n", i,
-      (value.size() < 20 ? value : value.substr(value.size()) + "...").c_str(), "poison"
+      "        [%llu] = %s (%s)\n", i, DumpT()(buffer_[i]).c_str(),
+      DefaultPoison<T>()() ==
+          std::string_view(reinterpret_cast<const char*>(&buffer_[i]),sizeof(T))
+          ? "poison" : "NOT poison"
       );
-    } else {
-      printf(
-      "        [%llu] = %s (%s)\n", i, DumpT()(buffer_[i]).c_str(), "NOT poison"
-      );
-    }
+    fflush(stdin);
   }
   printf(
       "T* buffer_ = [%p] (%s)\n", buffer_,
-      reinterpret_cast<char*>(buffer_) != reinterpret_cast<char*>(&char_buffer_) ? "ERROR" : "Ok"
+      reinterpret_cast<const char*>(buffer_) !=
+      reinterpret_cast<const char*>(&char_buffer_)
+      ? "ERROR" : "Ok"
       );
+  fflush(stdin);
   printf(
-      "size_t check_sum_ = %llu (%s)\n", *check_sum_, *check_sum_ != CalculateCheckSum() ? "ERROR" : "Ok"
+      "size_t check_sum_ = %llu (%s)\n",
+      *check_sum_, *check_sum_ != CalculateCheckSum() ? "ERROR" : "Ok"
       );
+  fflush(stdin);
   printf(
       "size_t end_canary = %llu (%s)\n", end_canary_, end_canary_ != CANARY_POISON ? "ERROR" : "Ok"
       );
+  fflush(stdin);
   printf(
       "}\n"
       );
   fflush(stdin);
 }
+
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -279,12 +261,15 @@ void UnbreakableStack<T,
                       Static,
                       DumpT,
                       storage_size>::Push(T&& value) {
+  assert(&value != nullptr);
   VERIFIED(Ok());
-  assert(size_ != storage_size || (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
-  new (reinterpret_cast<char*>(buffer_ + size_))
-                                                            T(std::move(value));
+  assert(size_ != storage_size ||
+  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
+  new (reinterpret_cast<char*>(buffer_ + size_)) T(std::move(value));
   ++size_;
+#ifndef NDEBUG
   *check_sum_ = CalculateCheckSum();
+#endif
   VERIFIED(Ok());
 }
 
@@ -297,10 +282,13 @@ void UnbreakableStack<T,
                       DumpT,
                       storage_size>::Emplace(Args... args) {
   VERIFIED(Ok());
-  assert(size_ != storage_size || (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
+  assert(size_ != storage_size ||
+  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
   new (reinterpret_cast<char*>(buffer_ + size_)) T(std::forward(args...));
   ++size_;
+#ifndef NDEBUG
   *check_sum_ = CalculateCheckSum();
+#endif
   VERIFIED(Ok());
 }
 
@@ -308,8 +296,9 @@ template<typename T,
          typename DumpT,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::Pop() {
-  VERIFIED(Ok() && size_ != 0);
-  assert(size_ != 0 || Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__));
+  VERIFIED(Ok());
+  assert(size_ != 0 ||
+  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
 
 #ifndef NDEBUG
   buffer_[size_ - 1].~T();
@@ -320,7 +309,9 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Pop() {
 #endif
   --size_;
 
-  VERIFIED(Ok() && size_ >= 0);
+  VERIFIED(Ok());
+  assert(size_ >= 0 ||
+  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
 }
 
 template<typename T,
@@ -331,7 +322,8 @@ const T& UnbreakableStack<T,
                           DumpT,
                           storage_size>::Top() const noexcept {
   VERIFIED(Ok());
-  assert(size_ != 0 || Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__));
+  assert(size_ != 0 ||
+  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
   return buffer_[size_ - 1];
 }
 
