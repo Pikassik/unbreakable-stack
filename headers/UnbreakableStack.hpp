@@ -9,14 +9,17 @@
 #include <cassert>
 #include <type_traits>
 
+#define __IS_NOT_FATAL__ true
+
 #ifndef NDEBUG
 #define VERIFIED(boolean_arg) {\
   if (!boolean_arg) {\
     Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);\
-    assert(true);\
+    assert(__IS_NOT_FATAL__);\
   }\
 }
 #endif
+
 
 enum : size_t {
   CANARY_POISON        = 0xDEADBEEFCACED426,
@@ -24,6 +27,7 @@ enum : size_t {
   DEFAULT_STORAGE_SIZE = 8,
   MULTIPLIER           = 7
 };
+
 
 constexpr size_t ConstexprRandom() {
   const char time[] = __TIME__;
@@ -56,11 +60,11 @@ char SymbolFromXDigit(unsigned char digit) {
   }
 }
 
-template <typename T, bool IsClass = std::disjunction_v<std::is_class<T>, std::is_union<T>>>
+template <typename T, bool IsClass = std::is_arithmetic_v<T>>
 struct DefaultDump;
 
 template <typename T>
-struct DefaultDump<T, true> {
+struct DefaultDump<T, false> {
   std::string operator()(const T& value) {
     std::string value_string =
         std::string(reinterpret_cast<const char*>(&value), sizeof(T));
@@ -80,13 +84,11 @@ struct DefaultDump<T, true> {
 };
 
 template <typename T>
-struct DefaultDump<T, false> {
+struct DefaultDump<T, true> {
   std::string operator()(const T& value) {
     return std::to_string(value);
   }
 };
-//template <typename T>
-
 
 class Static;
 class Dynamic;
@@ -114,16 +116,14 @@ class UnbreakableStack<T, Static, DumpT, ValuePoison, storage_size> {
   ~UnbreakableStack();
  private:
 
-  struct Wrapper {
-    char begin_wrapper_canary[ConstexprRandom() % 100] = {};
-    T value;
-    char end_wrapper_canary  [ConstexprRandom() % 100] = {};
-  };
+
+//  T value;
+
 
   size_t begin_canary_                  = CANARY_POISON;
   size_t size_                          = 0;
-  char char_buffer_[sizeof(Wrapper) * storage_size] = {};
-  Wrapper* buffer_                             = reinterpret_cast<Wrapper*>(&char_buffer_);
+  char char_buffer_[sizeof(T) * storage_size] = {};
+  T* buffer_                             = reinterpret_cast<T*>(&char_buffer_);
   std::unique_ptr<size_t> check_sum_    = std::make_unique<size_t>(0);
   size_t end_canary_                    = CANARY_POISON;
   bool Ok();
@@ -143,7 +143,7 @@ void UnbreakableStack<T,
                       ValuePoison,
                       storage_size>::Push(const T& value) {
   VERIFIED(Ok());
-  new (reinterpret_cast<char*>(buffer_ + size_) + sizeof(Wrapper::begin_wrapper_canary)) T(value);
+  new (reinterpret_cast<char*>(buffer_ + size_)) T(value);
   ++size_;
   *check_sum_ = CalculateCheckSum();
   VERIFIED(Ok());
@@ -162,7 +162,7 @@ UnbreakableStack<T,
   std::string poison = ValuePoison()();
   for (size_t i = 0; i < storage_size; ++i) {
     for (size_t j = 0; j < sizeof(T); ++j) {
-      reinterpret_cast<char*>(&buffer_[i].value)[j] = poison[j];
+      reinterpret_cast<char*>(&buffer_[i])[j] = poison[j];
     }
   }
   *check_sum_ = CalculateCheckSum();
@@ -204,7 +204,7 @@ bool UnbreakableStack<T,
 
   std::string poison = ValuePoison()();
   for (size_t i = size_; i < storage_size; ++i) {
-    if (std::string(reinterpret_cast<const char*>(&buffer_[i].value), sizeof(T))
+    if (std::string(reinterpret_cast<const char*>(&buffer_[i]), sizeof(T))
                           != poison)              return false;
   }
   auto x = CalculateCheckSum();
@@ -244,12 +244,12 @@ void UnbreakableStack<T,
       );
   for (size_t i = 0; i < size_; ++i) {
     std::printf(
-      "       *[%llu] = %s\n", i, DumpT()(buffer_[i].value).c_str()
+      "       *[%llu] = %s\n", i, DumpT()(buffer_[i]).c_str()
       );
   }
   for (size_t i = size_; i < storage_size; ++i) {
     std::string value =
-        std::string(reinterpret_cast<const char*>(&buffer_[i].value), sizeof(T));
+        std::string(reinterpret_cast<const char*>(&buffer_[i]), sizeof(T));
     if (value == DefaultPoison<T>()()) {
       printf(
       "        [%llu] = %s (%s)\n", i,
@@ -257,15 +257,15 @@ void UnbreakableStack<T,
      );
     } else {
       printf(
-      "        [%llu] = %s (%s)\n", i, DumpT()(buffer_[i].value).c_str(),
+      "        [%llu] = %s (%s)\n", i, DumpT()(buffer_[i]).c_str(),
       std::string(
-          reinterpret_cast<const char*>(&buffer_[i].value), sizeof(T)) == ValuePoison()() ?
+          reinterpret_cast<const char*>(&buffer_[i]), sizeof(T)) == ValuePoison()() ?
       "poison" : "NOT poison"
       );
     }
   }
   printf(
-      "}"
+      "}\n"
       );
   fflush(stdin);
 }
@@ -280,7 +280,7 @@ void UnbreakableStack<T,
                       storage_size>::Push(T&& value) {
   VERIFIED(Ok());
   assert(size_ != storage_size);
-  new (reinterpret_cast<char*>(buffer_ + size_) + sizeof(Wrapper::begin_wrapper_canary))
+  new (reinterpret_cast<char*>(buffer_ + size_))
                                                             T(std::move(value));
   ++size_;
   *check_sum_ = CalculateCheckSum();
@@ -298,7 +298,7 @@ void UnbreakableStack<T,
                       ValuePoison,
                       storage_size>::Emplace(Args... args) {
   VERIFIED(Ok());
-  new (reinterpret_cast<char*>(buffer_ + size_) + sizeof(Wrapper::begin_wrapper_canary)) T(std::forward(args...));
+  new (reinterpret_cast<char*>(buffer_ + size_)) T(std::forward(args...));
   ++size_;
   *check_sum_ = CalculateCheckSum();
   VERIFIED(Ok());
@@ -312,10 +312,10 @@ void UnbreakableStack<T, Static, DumpT, ValuePoison, storage_size>::Pop() {
   VERIFIED(Ok() && size_ != 0);
 
 #ifndef NDEBUG
-  buffer_[size_ - 1].value.~T();
+  buffer_[size_ - 1].~T();
   std::string poison = ValuePoison()();
   for (size_t j = 0; j < sizeof(T); ++j) {
-    reinterpret_cast<char*>(&buffer_[size_ - 1].value)[j] = poison[j];
+    reinterpret_cast<char*>(&buffer_[size_ - 1])[j] = poison[j];
   }
 #endif
   --size_;
@@ -330,7 +330,7 @@ const T& UnbreakableStack<T,
                           ValuePoison,
                           storage_size>::Top() const noexcept {
   VERIFIED(Ok() && size_ != 0);
-  return buffer_[size_ - 1].value;
+  return buffer_[size_ - 1];
 }
 
 template<typename T, typename DumpT, typename ValuePoison, size_t storage_size>
@@ -341,6 +341,6 @@ UnbreakableStack<T,
                  storage_size>::~UnbreakableStack() {
   VERIFIED(Ok());
   for (size_t i = 0; i < size_; ++i) {
-    buffer_[i].value.~T();
+    buffer_[i].~T();
   }
 }
