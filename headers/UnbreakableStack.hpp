@@ -7,6 +7,7 @@
 #include <memory>
 #include <unistd.h>
 #include <cassert>
+#include <type_traits>
 
 #ifndef NDEBUG
 #define VERIFIED(boolean_arg) {\
@@ -41,9 +42,8 @@ struct DefaultPoison {
   std::string operator()() {
     std::string poison;
     for (size_t i = 0; i < sizeof(T); ++i) {
-      poison.push_back(static_cast<char>(i) == 0 ? 1 : i);
+      poison.push_back(static_cast<char>(i) == 0 ? 'a' : i % ('z' - 'a' + 1) + 'a');
     }
-    poison.push_back(0);
     return poison;
   }
 };
@@ -56,26 +56,15 @@ char SymbolFromXDigit(unsigned char digit) {
   }
 }
 
-struct SuperDump;
+template <typename T, bool IsClass = std::disjunction_v<std::is_class<T>, std::is_union<T>>>
+struct DefaultDump;
 
-struct C {
-  friend class SuperDump;
- private:
-  void Dump() const;
-};
-
-struct SuperDump {
-  std::string operator()(const C& x) {
-    x.Dump();
-    return {};
-  }
-};
-
-template <class T>
-struct DefaultDump {
+template <typename T>
+struct DefaultDump<T, true> {
   std::string operator()(const T& value) {
-    std::string value_string = std::string(reinterpret_cast<const char*>(&value), sizeof(T));
-    std::string dump;
+    std::string value_string =
+        std::string(reinterpret_cast<const char*>(&value), sizeof(T));
+    std::string dump = "0x";
     for (int64_t i = value_string.size() - 1; i >= 0; --i) {
       unsigned char byte = value_string[i];
 
@@ -86,9 +75,18 @@ struct DefaultDump {
       dump.push_back(SymbolFromXDigit(right_byte));
     }
 
-    return "0x" + dump;
+    return dump;
   }
 };
+
+template <typename T>
+struct DefaultDump<T, false> {
+  std::string operator()(const T& value) {
+    return std::to_string(value);
+  }
+};
+//template <typename T>
+
 
 class Static;
 class Dynamic;
@@ -113,7 +111,7 @@ class UnbreakableStack<T, Static, DumpT, ValuePoison, storage_size> {
   void Pop();
 
   const T& Top() const noexcept;
-
+  ~UnbreakableStack();
  private:
 
   struct Wrapper {
@@ -122,14 +120,15 @@ class UnbreakableStack<T, Static, DumpT, ValuePoison, storage_size> {
     char end_wrapper_canary  [ConstexprRandom() % 100] = {};
   };
 
-  size_t begin_canary_ = CANARY_POISON;
-  size_t size_         = 0;
-  Wrapper buffer_              [storage_size];
-  size_t check_sum_    = 0;
-  size_t end_canary_   = CANARY_POISON;
+  size_t begin_canary_                  = CANARY_POISON;
+  size_t size_                          = 0;
+  char char_buffer_[sizeof(Wrapper) * storage_size] = {};
+  Wrapper* buffer_                             = reinterpret_cast<Wrapper*>(&char_buffer_);
+  std::unique_ptr<size_t> check_sum_    = std::make_unique<size_t>(0);
+  size_t end_canary_                    = CANARY_POISON;
   bool Ok();
   void Dump(const char* filename,
-            const char* line,
+            int line,
             const char* function_name);
   size_t CalculateCheckSum() const;
 };
@@ -144,9 +143,9 @@ void UnbreakableStack<T,
                       ValuePoison,
                       storage_size>::Push(const T& value) {
   VERIFIED(Ok());
-  new (&buffer_ + size_) T(value);
+  new (reinterpret_cast<char*>(buffer_ + size_) + sizeof(Wrapper::begin_wrapper_canary)) T(value);
   ++size_;
-  check_sum_ = CalculateCheckSum();
+  *check_sum_ = CalculateCheckSum();
   VERIFIED(Ok());
 }
 
@@ -160,13 +159,13 @@ UnbreakableStack<T,
                  ValuePoison,
                  storage_size>::UnbreakableStack() {
 #ifndef NDEBUG
-  check_sum_ = CalculateCheckSum();
   std::string poison = ValuePoison()();
   for (size_t i = 0; i < storage_size; ++i) {
     for (size_t j = 0; j < sizeof(T); ++j) {
       reinterpret_cast<char*>(&buffer_[i].value)[j] = poison[j];
     }
   }
+  *check_sum_ = CalculateCheckSum();
 #endif
 }
 
@@ -201,14 +200,15 @@ bool UnbreakableStack<T,
   if (this                == nullptr)             return false;
   if (begin_canary_       != CANARY_POISON)       return false;
   if (end_canary_         != CANARY_POISON)       return false;
-  if (size_               >= storage_size)        return false;
+  if (size_               >  storage_size)        return false;
 
+  std::string poison = ValuePoison()();
   for (size_t i = size_; i < storage_size; ++i) {
-    if (std::string(&buffer_[i].value, sizeof(T))
-                          != ValuePoison()())     return false;
+    if (std::string(reinterpret_cast<const char*>(&buffer_[i].value), sizeof(T))
+                          != poison)              return false;
   }
-
-  if (check_sum_          != CalculateCheckSum()) return false;
+  auto x = CalculateCheckSum();
+  if (*check_sum_         != CalculateCheckSum()) return false;
 
   return true;
 }
@@ -222,10 +222,10 @@ void UnbreakableStack<T,
                       DumpT,
                       ValuePoison,
                       storage_size>::Dump(const char* filename,
-                                          const char* line,
+                                          int line,
                                           const char* function_name) {
   std::printf(
-      "Ok failed! from %s (%d) %s:\n", filename, line, function_name
+      "Ok failed! from %s (%d)\n%s:\n", filename, line, function_name
       );
   std::printf(
       "UnbreakableStack<T, StorageType, storage_size> with T = %s, "
@@ -240,7 +240,7 @@ void UnbreakableStack<T,
       "    size_ = %llu\n", size_
       );
   std::printf(
-      "    buffer_[%llu] [%p] =\n", storage_size, &buffer_
+      "    buffer_[%llu] [%p] =\n", storage_size, buffer_
       );
   for (size_t i = 0; i < size_; ++i) {
     std::printf(
@@ -250,15 +250,16 @@ void UnbreakableStack<T,
   for (size_t i = size_; i < storage_size; ++i) {
     std::string value =
         std::string(reinterpret_cast<const char*>(&buffer_[i].value), sizeof(T));
-    if (value == DefaultPoison<T>()) {
+    if (value == DefaultPoison<T>()()) {
       printf(
-      "        [%llu] = %s (%s)\n",
-      value.size() < 10 ? value : value.substr(10) + "...", "poison"
+      "        [%llu] = %s (%s)\n", i,
+      (value.size() < 10 ? value : value.substr(value.size()) + "...").c_str(), "poison"
      );
     } else {
       printf(
-      "        [%llu] = %s (%s)\n", i, DumpT()(buffer_[i].value),
-      std::string(&buffer_[i].value, sizeof(T)) == ValuePoison()() ?
+      "        [%llu] = %s (%s)\n", i, DumpT()(buffer_[i].value).c_str(),
+      std::string(
+          reinterpret_cast<const char*>(&buffer_[i].value), sizeof(T)) == ValuePoison()() ?
       "poison" : "NOT poison"
       );
     }
@@ -278,11 +279,14 @@ void UnbreakableStack<T,
                       ValuePoison,
                       storage_size>::Push(T&& value) {
   VERIFIED(Ok());
-  new (&buffer_ + size_) T(std::move(value));
+  assert(size_ != storage_size);
+  new (reinterpret_cast<char*>(buffer_ + size_) + sizeof(Wrapper::begin_wrapper_canary))
+                                                            T(std::move(value));
   ++size_;
-  check_sum_ = CalculateCheckSum();
+  *check_sum_ = CalculateCheckSum();
   VERIFIED(Ok());
 }
+
 template<typename T,
          typename DumpT,
          typename ValuePoison,
@@ -294,9 +298,9 @@ void UnbreakableStack<T,
                       ValuePoison,
                       storage_size>::Emplace(Args... args) {
   VERIFIED(Ok());
-  new (&buffer_ + size_) T(std::forward(args...));
+  new (reinterpret_cast<char*>(buffer_ + size_) + sizeof(Wrapper::begin_wrapper_canary)) T(std::forward(args...));
   ++size_;
-  check_sum_ = CalculateCheckSum();
+  *check_sum_ = CalculateCheckSum();
   VERIFIED(Ok());
 }
 
@@ -308,7 +312,7 @@ void UnbreakableStack<T, Static, DumpT, ValuePoison, storage_size>::Pop() {
   VERIFIED(Ok() && size_ != 0);
 
 #ifndef NDEBUG
-  buffer_[size_ - 1].~T();
+  buffer_[size_ - 1].value.~T();
   std::string poison = ValuePoison()();
   for (size_t j = 0; j < sizeof(T); ++j) {
     reinterpret_cast<char*>(&buffer_[size_ - 1].value)[j] = poison[j];
@@ -317,4 +321,26 @@ void UnbreakableStack<T, Static, DumpT, ValuePoison, storage_size>::Pop() {
   --size_;
 
   VERIFIED(Ok() && size_ >= 0);
+}
+
+template<typename T, typename DumpT, typename ValuePoison, size_t storage_size>
+const T& UnbreakableStack<T,
+                          Static,
+                          DumpT,
+                          ValuePoison,
+                          storage_size>::Top() const noexcept {
+  VERIFIED(Ok() && size_ != 0);
+  return buffer_[size_ - 1].value;
+}
+
+template<typename T, typename DumpT, typename ValuePoison, size_t storage_size>
+UnbreakableStack<T,
+                 Static,
+                 DumpT,
+                 ValuePoison,
+                 storage_size>::~UnbreakableStack() {
+  VERIFIED(Ok());
+  for (size_t i = 0; i < size_; ++i) {
+    buffer_[i].value.~T();
+  }
 }
