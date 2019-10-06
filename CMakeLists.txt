@@ -3,7 +3,8 @@ project(unbreakable_stack)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(CMAKE_CXX_FLAGS -g)
+#set(CMAKE_CXX_FLAGS "-DNDEBUG")
+
 ######
 
 # Download and unpack googletest at configure time
@@ -43,6 +44,8 @@ include_directories(.)
 
 add_executable(unbreakable_stack
                main.cpp
-        headers/UnbreakableStack.hpp headers/UnbreakableStackFunctions.h sources/UnbreakableStackFunctions.cpp)
+               headers/UnbreakableStack.hpp
+               headers/UnbreakableStackFunctions.h
+               sources/UnbreakableStackFunctions.cpp)
 
 target_link_libraries(unbreakable_stack gtest gtest_main)

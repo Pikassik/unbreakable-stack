@@ -8,7 +8,7 @@
 #include <cassert>
 #include <type_traits>
 
-#define IS_NOT_FATAL true
+#define IS_NOT_FATAL false
 
 #ifndef NDEBUG
 #define VERIFIED(boolean_arg) {\
@@ -17,6 +17,8 @@
     assert(IS_NOT_FATAL);\
   }\
 }
+#else
+#define VERIFIED(x)
 #endif
 
 enum : size_t {
@@ -51,14 +53,27 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
 
   const T& Top() const noexcept;
 
+  size_t Size() const noexcept;
+
+ private:
+
+#ifndef NDEBUG
   size_t begin_canary_                  = CANARY_POISON;
+#endif
+
   size_t size_                          = 0;
   char char_buffer_[sizeof(T) * storage_size] = {};
+
+#ifndef NDEBUG
   std::unique_ptr<size_t> check_sum_    = std::make_unique<size_t>(0);
   size_t end_canary_                    = CANARY_POISON;
+#endif
+
+#ifndef NDEBUG
   bool Ok() const noexcept;
   void Dump(const char* filename, int line, const char* function_name) const;
   size_t CalculateCheckSum() const;
+#endif
 };
 
 template<typename T,
@@ -81,7 +96,7 @@ template<typename T,
          typename DumpT,
          size_t storage_size>
 UnbreakableStack<T, Static, DumpT, storage_size>::~UnbreakableStack() {
-  VERIFIED(Ok())
+  VERIFIED(Ok());
 
   for (size_t i = 0; i < size_; ++i) {
     reinterpret_cast<T*>(char_buffer_)[i].~T();
@@ -93,13 +108,16 @@ template<typename T,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::Push(const T& value) {
   assert(&value != nullptr);
-  VERIFIED(Ok())
+  VERIFIED(Ok());
+
   new (reinterpret_cast<T*>(char_buffer_) + size_) T(value);
   ++size_;
+
 #ifndef NDEBUG
   *check_sum_ = CalculateCheckSum();
 #endif
-  VERIFIED(Ok())
+
+  VERIFIED(Ok());
 }
 
 template<typename T,
@@ -118,7 +136,7 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Push(T&& value) {
   *check_sum_ = CalculateCheckSum();
 #endif
 
-  VERIFIED(Ok())
+  VERIFIED(Ok());
 }
 
 template<typename T,
@@ -126,7 +144,7 @@ template<typename T,
          size_t storage_size>
 template<typename... Args>
 void UnbreakableStack<T, Static, DumpT, storage_size>::Emplace(Args... args) {
-  VERIFIED(Ok())
+  VERIFIED(Ok());
   assert(size_ != storage_size ||
   (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
 
@@ -137,14 +155,14 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Emplace(Args... args) {
   *check_sum_ = CalculateCheckSum();
 #endif
 
-  VERIFIED(Ok())
+  VERIFIED(Ok());
 }
 
 template<typename T,
          typename DumpT,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::Pop() {
-  VERIFIED(Ok())
+  VERIFIED(Ok());
   assert(size_ != 0 ||
   (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
 
@@ -158,9 +176,11 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Pop() {
                             reinterpret_cast<T*>(char_buffer_) + size_
                             )[j] = poison[j];
   }
+
+  *check_sum_ = CalculateCheckSum();
 #endif
 
-  VERIFIED(Ok())
+  VERIFIED(Ok());
 }
 
 template<typename T,
@@ -168,12 +188,22 @@ template<typename T,
          size_t storage_size>
 const T& UnbreakableStack<T, Static, DumpT, storage_size>::
     Top() const noexcept {
-  VERIFIED(Ok())
+  VERIFIED(Ok());
   assert(size_ != 0 ||
   (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
 
   return reinterpret_cast<const T*>(char_buffer_)[size_ - 1];
 }
+
+template<typename T,
+         typename DumpT,
+         size_t storage_size>
+size_t UnbreakableStack<T, Static, DumpT, storage_size>::Size() const noexcept {
+  VERIFIED(Ok());
+  return size_;
+}
+
+#ifndef NDEBUG
 
 template<typename T,
          typename DumpT,
@@ -286,3 +316,5 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
       );
   fflush(stdin);
 }
+
+#endif

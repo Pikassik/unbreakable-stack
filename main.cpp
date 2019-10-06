@@ -6,10 +6,15 @@ using std::vector;
 
 int main() {
   UnbreakableStack<int, Static, DefaultDump<int>, 100> st;
-  for (size_t i = 0 ; i < 101; ++i) {
+  for (size_t i = 0 ; i < 100; ++i) {
     st.Push({static_cast<int>(i)});
-    st.Top();
+    std::cout << st.Top() << std::endl;
   }
-//  st.Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);
+  st.Size();
+  for (size_t i = 0 ; i < 100; ++i) {
+    std::cout << st.Top() << std::endl;
+    st.Pop();
+  }
+
   return 0;
 }
