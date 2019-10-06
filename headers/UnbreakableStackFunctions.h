@@ -53,7 +53,7 @@ template <typename T>
 struct DefaultDump<T, true> {
   std::string operator()(const T& value) const;
 };
-,
+
 template <typename T>
 std::string DefaultDump<T, true>::operator()(const T& value) const {
   return std::to_string(value);
