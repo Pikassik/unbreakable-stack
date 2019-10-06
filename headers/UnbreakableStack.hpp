@@ -1,3 +1,7 @@
+/*!
+ * @file Stack class with protectors, checks and dump in stdin
+ */
+
 #pragma once
 
 #include <headers/UnbreakableStackFunctions.h>
@@ -8,7 +12,7 @@
 #include <cassert>
 #include <type_traits>
 
-#define IS_NOT_FATAL false
+#define IS_NOT_FATAL true
 
 #ifndef NDEBUG
 #define VERIFIED(boolean_arg) {\
@@ -21,6 +25,11 @@
 #define VERIFIED(x)
 #endif
 
+#ifdef TESTING
+#undef VERIFIED
+#define VERIFIED(boolean_arg) {assert(boolean_arg);}
+#endif
+
 enum : size_t {
   CANARY_POISON        = 0xDEADBEEFCACED426,
   DEFAULT_STORAGE_SIZE = 8,
@@ -29,16 +38,37 @@ enum : size_t {
 class Static;
 class Dynamic;
 
+class TestUnbreakableSort;
+
+/*!
+ * @brief Stack class which checks his state in start and end of every method
+ * and dumps if it's not successfull
+ *
+ * @tparam T Value type
+ * @tparam StorageType Dynamic or Static
+ * @tparam DumpT Functor to dump T object
+ * @tparam storage_size Max size of storage for static version
+ */
 template <typename T,
           typename StorageType,
           typename DumpT = DefaultDump<T>,
           size_t storage_size = DEFAULT_STORAGE_SIZE>
 class UnbreakableStack;
 
+
+/*!
+ * @brief Static version (template specialization)
+ *
+ * @tparam T Value type
+ * @tparam DumpT Functor to dump T object
+ * @tparam storage_size Max size of storage for static version
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
 class UnbreakableStack<T, Static, DumpT, storage_size> {
+  friend TestUnbreakableSort;
+
  public:
   UnbreakableStack();
   ~UnbreakableStack();
@@ -76,39 +106,54 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
 #endif
 };
 
+
+/*!
+ * @brief fill buffer with poison and calculates check sum
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
 UnbreakableStack<T, Static, DumpT, storage_size>::UnbreakableStack() {
 #ifndef NDEBUG
-  std::string poison = DefaultPoison<T>()();
+  std::string poison = Poison<T>()();
   for (size_t i = 0; i < storage_size; ++i) {
     for (size_t j = 0; j < sizeof(T); ++j) {
       reinterpret_cast<char*>(reinterpret_cast<T*>(&char_buffer_) + i)[j] =
       poison[j];
     }
   }
+
   *check_sum_ = CalculateCheckSum();
 #endif
 }
 
+
+/*!
+ * @brief destroys every elem in [0, size_)
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
 UnbreakableStack<T, Static, DumpT, storage_size>::~UnbreakableStack() {
-  VERIFIED(Ok());
+  VERIFIED(Ok())
 
   for (size_t i = 0; i < size_; ++i) {
     reinterpret_cast<T*>(char_buffer_)[i].~T();
   }
 }
 
+
+/*!
+ * @brief checks stack state, constructs elem in size_ pos from value checks
+ * again and calculates again check sum
+ * @param value &value must be not nullptr
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::Push(const T& value) {
   assert(&value != nullptr);
-  VERIFIED(Ok());
+  VERIFIED(Ok())
 
   new (reinterpret_cast<T*>(char_buffer_) + size_) T(value);
   ++size_;
@@ -117,9 +162,14 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Push(const T& value) {
   *check_sum_ = CalculateCheckSum();
 #endif
 
-  VERIFIED(Ok());
+  VERIFIED(Ok())
 }
 
+/*!
+ * @brief checks stack state, constructs elem in size_ pos from value checks
+ * again and calculates again check sum
+ * @param value &value must not be nullptr
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -127,7 +177,7 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Push(T&& value) {
   VERIFIED(Ok())
   assert(&value != nullptr);
   assert(size_ != storage_size ||
-  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
+  (({VERIFIED(false);}), false));
 
   new (reinterpret_cast<T*>(char_buffer_) + size_) T(std::move(value));
   ++size_;
@@ -136,9 +186,14 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Push(T&& value) {
   *check_sum_ = CalculateCheckSum();
 #endif
 
-  VERIFIED(Ok());
+  VERIFIED(Ok())
 }
 
+/*!
+ * @brief checks stack state, constructs elem in size_ pos from args checks
+ * again and calculates again check sum
+ * @param args
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -146,7 +201,7 @@ template<typename... Args>
 void UnbreakableStack<T, Static, DumpT, storage_size>::Emplace(Args... args) {
   VERIFIED(Ok());
   assert(size_ != storage_size ||
-  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
+  ((VERIFIED(false)), false));
 
   new (reinterpret_cast<T*>(char_buffer_) + size_) T(std::forward(args...));
   ++size_;
@@ -158,19 +213,23 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Emplace(Args... args) {
   VERIFIED(Ok());
 }
 
+/*!
+ * @brief check state, destroys elem in size_ - 1 pos, decrease size_, fill it
+ * with poison, calculate new check sum and check state again
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::Pop() {
   VERIFIED(Ok());
   assert(size_ != 0 ||
-  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
+  (({VERIFIED(false)}), false));
 
   reinterpret_cast<T*>(char_buffer_)[size_ - 1].~T();
   --size_;
 
 #ifndef NDEBUG
-  std::string poison = DefaultPoison<T>()();
+  std::string poison = Poison<T>()();
   for (size_t j = 0; j < sizeof(T); ++j) {
     reinterpret_cast<char*>(
                             reinterpret_cast<T*>(char_buffer_) + size_
@@ -183,6 +242,11 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Pop() {
   VERIFIED(Ok());
 }
 
+/*!
+ * @brief checks state and non-zero size and returns reference to top
+ * @return buffer[size_ - 1]
+ */
+
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -190,11 +254,15 @@ const T& UnbreakableStack<T, Static, DumpT, storage_size>::
     Top() const noexcept {
   VERIFIED(Ok());
   assert(size_ != 0 ||
-  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
+  (({VERIFIED(false);}), false));
 
   return reinterpret_cast<const T*>(char_buffer_)[size_ - 1];
 }
 
+/*!
+ * @brief checks state and returns size_
+ * @return size_
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -205,6 +273,12 @@ size_t UnbreakableStack<T, Static, DumpT, storage_size>::Size() const noexcept {
 
 #ifndef NDEBUG
 
+
+/*!
+ *
+ * @brief calculates hash from object casted to string
+ * @return check sum of object
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -216,6 +290,10 @@ size_t  UnbreakableStack<T, Static,DumpT, storage_size>::
                      sizeof(UnbreakableStack<T, Static, DumpT, storage_size>)));
 }
 
+/*!
+ * @brief checks object's state
+ * @return is object's state ok
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -227,7 +305,7 @@ bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() const noexcept {
   if (size_               >  storage_size)        return false;
   if (size_               == SIZE_MAX)            return false;
 
-  std::string poison = DefaultPoison<T>()();
+  std::string poison = Poison<T>()();
   for (size_t i = size_; i < storage_size; ++i) {
     if (std::string(reinterpret_cast<const char*>(
         reinterpret_cast<const T*>(char_buffer_) + i
@@ -239,6 +317,12 @@ bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() const noexcept {
   return true;
 }
 
+/*!
+ * @brief prints in stdin formatted state of object
+ * @param filename of place where it is called
+ * @param line of place where it is called
+ * @param function_name where it is called
+ */
 template<typename T,
          typename DumpT,
          size_t storage_size>
@@ -247,74 +331,74 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
   std::printf(
       "Ok failed! from %s (%d)\n%s:\n", filename, line, function_name
       );
-  fflush(stdin);
+  fflush(stdout);
   std::printf(
       "UnbreakableStack<T, StorageType, storage_size> with [T = %s; "
       "StorageType = Static; size_t storage_size = %llu] [%p] (%s) {\n",
       abi::__cxa_demangle(typeid(T).name(), nullptr, nullptr, nullptr),
       storage_size, this, this == nullptr ? "ERROR" : "Ok"
       );
-  fflush(stdin);
+  fflush(stdout);
   if (!this) {
     std::printf(
       "}\n"
       );
-    fflush(stdin);
+    fflush(stdout);
     return;
   }
   std::printf(
       "    errno = %d (%s)\n", errno, errno != 0 ? "ERROR" : "Ok"
       );
-  fflush(stdin);
+  fflush(stdout);
   printf(
       "    size_t begin_canary = %llu (%s)\n", begin_canary_,
       begin_canary_ != CANARY_POISON ? "ERROR" : "Ok"
       );
-  fflush(stdin);
+  fflush(stdout);
   std::printf(
       "    size_t size_ = %llu (%s)\n", size_, size_ >= storage_size ?
       (size_ == storage_size ? "Full" : "OVERFLOW") : "Ok"
       );
-  fflush(stdin);
+  fflush(stdout);
   std::printf(
       "    char[] char_buffer_[%llu] [%p] =\n", storage_size, &char_buffer_
       );
-  fflush(stdin);
+  fflush(stdout);
   for (size_t i = 0; i < size_; ++i) {
     std::printf(
       "       *[%llu] = %s\n", i, DumpT()(
                                  *(reinterpret_cast<const T*>(char_buffer_) + i)
                                          ).c_str()
       );
-    fflush(stdin);
+    fflush(stdout);
   }
   for (size_t i = size_; i < storage_size; ++i) {
       printf(
       "        [%llu] = %s (%s)\n", i, DumpT()(
                                  *(reinterpret_cast<const T*>(char_buffer_) + i)
                                               ).c_str(),
-      DefaultPoison<T>()() == std::string_view(
+      Poison<T>()() == std::string_view(
       reinterpret_cast<const char*>(
                                     reinterpret_cast<const T*>(char_buffer_) + i
                                    ), sizeof(T))
           ? "poison" : "NOT poison"
       );
-    fflush(stdin);
+    fflush(stdout);
   }
   printf(
       "size_t check_sum_ = %llu (%s)\n",
       *check_sum_, *check_sum_ != CalculateCheckSum() ? "ERROR" : "Ok"
       );
-  fflush(stdin);
+  fflush(stdout);
   printf(
       "size_t end_canary = %llu (%s)\n", end_canary_,
       end_canary_ != CANARY_POISON ? "ERROR" : "Ok"
       );
-  fflush(stdin);
+  fflush(stdout);
   printf(
       "}\n"
       );
-  fflush(stdin);
+  fflush(stdout);
 }
 
 #endif

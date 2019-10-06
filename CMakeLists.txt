@@ -3,7 +3,7 @@ project(unbreakable_stack)
 
 set(CMAKE_CXX_STANDARD 17)
 
-#set(CMAKE_CXX_FLAGS "-DNDEBUG")
+set(CMAKE_CXX_FLAGS "-DTESTING")
 
 ######
 
@@ -46,6 +46,6 @@ add_executable(unbreakable_stack
                main.cpp
                headers/UnbreakableStack.hpp
                headers/UnbreakableStackFunctions.h
-               sources/UnbreakableStackFunctions.cpp)
+               sources/UnbreakableStackFunctions.cpp tests/TestUnbreakableStack.cpp)
 
 target_link_libraries(unbreakable_stack gtest gtest_main)
