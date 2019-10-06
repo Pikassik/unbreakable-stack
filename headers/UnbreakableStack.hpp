@@ -1,5 +1,6 @@
 #pragma once
 
+#include <headers/UnbreakableStackFunctions.h>
 #include <cxxabi.h>
 #include <cstdio>
 #include <string>
@@ -22,56 +23,6 @@
 enum : size_t {
   CANARY_POISON        = 0xDEADBEEFCACED426,
   DEFAULT_STORAGE_SIZE = 8,
-};
-
-template <class T>
-struct DefaultPoison {
-  std::string operator()() {
-    std::string poison;
-    for (size_t i = 0; i < sizeof(T); ++i) {
-      poison.push_back(static_cast<char>(i) == 0 ?
-      'a' : i % ('z' - 'a' + 1) + 'a');
-    }
-    return poison;
-  }
-};
-
-char SymbolFromXDigit(unsigned char digit) {
-  if (digit < 10) {
-    return digit + '0';
-  } else {
-    return digit - 10 + 'A';
-  }
-}
-
-template <typename T, bool is_arithmetic = std::is_arithmetic_v<T>>
-struct DefaultDump;
-
-template <typename T>
-struct DefaultDump<T, false> {
-  std::string operator()(const T& value) {
-    std::string value_string =
-        std::string(reinterpret_cast<const char*>(&value), sizeof(T));
-    std::string dump = "0x";
-    for (int64_t i = value_string.size() - 1; i >= 0; --i) {
-      unsigned char byte = value_string[i];
-
-      unsigned char left_byte = byte >> 4;
-      dump.push_back(SymbolFromXDigit(left_byte));
-
-      unsigned char right_byte = byte - (left_byte << 4);
-      dump.push_back(SymbolFromXDigit(right_byte));
-    }
-
-    return dump;
-  }
-};
-
-template <typename T>
-struct DefaultDump<T, true> {
-  std::string operator()(const T& value) {
-    return std::to_string(value);
-  }
 };
 
 class Static;
@@ -119,8 +70,6 @@ template<typename T,
 void UnbreakableStack<T, Static, DumpT, storage_size>::Push(const T& value) {
   assert(&value != nullptr);
   VERIFIED(Ok());
-  assert(size_ != storage_size ||
-  (({Dump(__FILE__, __LINE__, __PRETTY_FUNCTION__);}), false));
   new (reinterpret_cast<char*>(buffer_ + size_)) T(value);
   ++size_;
 #ifndef NDEBUG
@@ -196,9 +145,9 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
     std::printf(
       "}\n"
       );
+    fflush(stdin);
     return;
   }
-  fflush(stdin);
   std::printf(
       "    errno = %d (%s)\n", errno, errno != 0 ? "ERROR" : "Ok"
       );

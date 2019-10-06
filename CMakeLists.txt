@@ -43,6 +43,6 @@ include_directories(.)
 
 add_executable(unbreakable_stack
                main.cpp
-        headers/UnbreakableStack.hpp)
+        headers/UnbreakableStack.hpp headers/UnbreakableStackFunctions.h sources/UnbreakableStackFunctions.cpp)
 
 target_link_libraries(unbreakable_stack gtest gtest_main)

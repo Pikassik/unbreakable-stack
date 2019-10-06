@@ -10,8 +10,5 @@ int main() {
     st.Push({static_cast<int>(i)});
     st.Top();
   }
-//  *((size_t*)&st + 10) = 100500;
-//  auto x = const_cast<vector<int>&>(st.Top());
-//  x.~vector<int>();
   return 0;
 }
