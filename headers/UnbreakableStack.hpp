@@ -74,13 +74,14 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
 
  public:
   UnbreakableStack();
+  UnbreakableStack(const UnbreakableStack&) = delete;
   ~UnbreakableStack();
 
   void Push(const T& value);
   void Push(T&& value);
 
   template <typename... Args>
-  void Emplace(Args... args);
+  void Emplace(Args&&... args);
 
   void Pop();
 
@@ -200,7 +201,7 @@ template<typename T,
          typename DumpT,
          size_t storage_size>
 template<typename... Args>
-void UnbreakableStack<T, Static, DumpT, storage_size>::Emplace(Args... args) {
+void UnbreakableStack<T, Static, DumpT, storage_size>::Emplace(Args&&... args) {
   VERIFIED(Ok());
   assert(size_ != storage_size ||
   ((VERIFIED(false)), false));
