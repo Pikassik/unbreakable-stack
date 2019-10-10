@@ -12,7 +12,9 @@
 #include <cassert>
 #include <type_traits>
 
+#ifndef IS_NOT_FATAL
 #define IS_NOT_FATAL true
+#endif
 
 #ifndef NDEBUG
 #define VERIFIED(boolean_arg) {\
@@ -32,13 +34,14 @@
 
 enum : size_t {
   CANARY_POISON        = 0xDEADBEEFCACED426,
-  DEFAULT_STORAGE_SIZE = 8,
+  POISON_BYTE          = 0xFC,
+  DEFAULT_STORAGE_SIZE = 8
 };
 
 class Static;
 class Dynamic;
 
-class TestUnbreakableSort;
+struct TestUnbreakableStack;
 
 /*!
  * @brief Stack class which checks his state in start and end of every method
@@ -67,7 +70,7 @@ template<typename T,
          typename DumpT,
          size_t storage_size>
 class UnbreakableStack<T, Static, DumpT, storage_size> {
-  friend TestUnbreakableSort;
+  friend TestUnbreakableStack;
 
  public:
   UnbreakableStack();
@@ -92,17 +95,19 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
 #endif
 
   size_t size_                          = 0;
-  char char_buffer_[sizeof(T) * storage_size] = {};
+  char buffer_[sizeof(T) * storage_size] = {};
 
 #ifndef NDEBUG
-  std::unique_ptr<size_t> check_sum_    = std::make_unique<size_t>(0);
+  size_t check_sum_                     = 0;
   size_t end_canary_                    = CANARY_POISON;
 #endif
 
 #ifndef NDEBUG
-  bool Ok() const noexcept;
+  bool Ok() noexcept;
   void Dump(const char* filename, int line, const char* function_name) const;
-  size_t CalculateCheckSum() const;
+  void FillWithPoison(size_t index);
+  bool IsPoison(size_t index) const noexcept ;
+  size_t CalculateCheckSum() noexcept;
 #endif
 };
 
@@ -115,15 +120,11 @@ template<typename T,
          size_t storage_size>
 UnbreakableStack<T, Static, DumpT, storage_size>::UnbreakableStack() {
 #ifndef NDEBUG
-  std::string poison = Poison<T>()();
   for (size_t i = 0; i < storage_size; ++i) {
-    for (size_t j = 0; j < sizeof(T); ++j) {
-      reinterpret_cast<char*>(reinterpret_cast<T*>(&char_buffer_) + i)[j] =
-      poison[j];
-    }
+    FillWithPoison(i);
   }
 
-  *check_sum_ = CalculateCheckSum();
+  check_sum_ = CalculateCheckSum();
 #endif
 }
 
@@ -138,8 +139,9 @@ UnbreakableStack<T, Static, DumpT, storage_size>::~UnbreakableStack() {
   VERIFIED(Ok())
 
   for (size_t i = 0; i < size_; ++i) {
-    reinterpret_cast<T*>(char_buffer_)[i].~T();
+    reinterpret_cast<T*>(buffer_)[i].~T();
   }
+  begin_canary_ = ~CANARY_POISON;
 }
 
 
@@ -155,11 +157,11 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Push(const T& value) {
   assert(&value != nullptr);
   VERIFIED(Ok())
 
-  new (reinterpret_cast<T*>(char_buffer_) + size_) T(value);
+  new (reinterpret_cast<T*>(buffer_) + size_) T(value);
   ++size_;
 
 #ifndef NDEBUG
-  *check_sum_ = CalculateCheckSum();
+  check_sum_ = CalculateCheckSum();
 #endif
 
   VERIFIED(Ok())
@@ -179,11 +181,11 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Push(T&& value) {
   assert(size_ != storage_size ||
   (({VERIFIED(false);}), false));
 
-  new (reinterpret_cast<T*>(char_buffer_) + size_) T(std::move(value));
+  new (reinterpret_cast<T*>(buffer_) + size_) T(std::move(value));
   ++size_;
 
 #ifndef NDEBUG
-  *check_sum_ = CalculateCheckSum();
+  check_sum_ = CalculateCheckSum();
 #endif
 
   VERIFIED(Ok())
@@ -203,11 +205,11 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Emplace(Args... args) {
   assert(size_ != storage_size ||
   ((VERIFIED(false)), false));
 
-  new (reinterpret_cast<T*>(char_buffer_) + size_) T(std::forward(args...));
+  new (reinterpret_cast<T*>(buffer_) + size_) T(std::forward(args...));
   ++size_;
 
 #ifndef NDEBUG
-  *check_sum_ = CalculateCheckSum();
+  check_sum_ = CalculateCheckSum();
 #endif
 
   VERIFIED(Ok());
@@ -225,18 +227,13 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::Pop() {
   assert(size_ != 0 ||
   (({VERIFIED(false)}), false));
 
-  reinterpret_cast<T*>(char_buffer_)[size_ - 1].~T();
+  reinterpret_cast<T*>(buffer_)[size_ - 1].~T();
   --size_;
 
 #ifndef NDEBUG
-  std::string poison = Poison<T>()();
-  for (size_t j = 0; j < sizeof(T); ++j) {
-    reinterpret_cast<char*>(
-                            reinterpret_cast<T*>(char_buffer_) + size_
-                            )[j] = poison[j];
-  }
+  FillWithPoison(size_);
 
-  *check_sum_ = CalculateCheckSum();
+  check_sum_ = CalculateCheckSum();
 #endif
 
   VERIFIED(Ok());
@@ -256,7 +253,7 @@ const T& UnbreakableStack<T, Static, DumpT, storage_size>::
   assert(size_ != 0 ||
   (({VERIFIED(false);}), false));
 
-  return reinterpret_cast<const T*>(char_buffer_)[size_ - 1];
+  return reinterpret_cast<const T*>(buffer_)[size_ - 1];
 }
 
 /*!
@@ -273,23 +270,6 @@ size_t UnbreakableStack<T, Static, DumpT, storage_size>::Size() const noexcept {
 
 #ifndef NDEBUG
 
-
-/*!
- *
- * @brief calculates hash from object casted to string
- * @return check sum of object
- */
-template<typename T,
-         typename DumpT,
-         size_t storage_size>
-size_t  UnbreakableStack<T, Static,DumpT, storage_size>::
-    CalculateCheckSum() const {
-  return reinterpret_cast<size_t>(this) +
-  std::hash<std::string_view>()(
-    std::string_view(reinterpret_cast<const char*>(this),
-                     sizeof(UnbreakableStack<T, Static, DumpT, storage_size>)));
-}
-
 /*!
  * @brief checks object's state
  * @return is object's state ok
@@ -297,7 +277,7 @@ size_t  UnbreakableStack<T, Static,DumpT, storage_size>::
 template<typename T,
          typename DumpT,
          size_t storage_size>
-bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() const noexcept {
+bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() noexcept {
 
   if (this                == nullptr)             return false;
   if (begin_canary_       != CANARY_POISON)       return false;
@@ -305,14 +285,11 @@ bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() const noexcept {
   if (size_               >  storage_size)        return false;
   if (size_               == SIZE_MAX)            return false;
 
-  std::string poison = Poison<T>()();
   for (size_t i = size_; i < storage_size; ++i) {
-    if (std::string(reinterpret_cast<const char*>(
-        reinterpret_cast<const T*>(char_buffer_) + i
-        ), sizeof(T))     != poison)              return false;
+    if (!IsPoison(i))                             return false;
   }
 
-  if (*check_sum_         != CalculateCheckSum()) return false;
+  if (check_sum_          != CalculateCheckSum()) return false;
 
   return true;
 }
@@ -331,74 +308,133 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
   std::printf(
       "Ok failed! from %s (%d)\n%s:\n", filename, line, function_name
       );
-  fflush(stdout);
+  std::fflush(stdout);
   std::printf(
       "UnbreakableStack<T, StorageType, storage_size> with [T = %s; "
       "StorageType = Static; size_t storage_size = %llu] [%p] (%s) {\n",
       abi::__cxa_demangle(typeid(T).name(), nullptr, nullptr, nullptr),
       storage_size, this, this == nullptr ? "ERROR" : "Ok"
       );
-  fflush(stdout);
+  std::fflush(stdout);
   if (!this) {
     std::printf(
       "}\n"
       );
-    fflush(stdout);
+    std::fflush(stdout);
     return;
   }
   std::printf(
       "    errno = %d (%s)\n", errno, errno != 0 ? "ERROR" : "Ok"
       );
-  fflush(stdout);
-  printf(
+  std::fflush(stdout);
+  std::printf(
       "    size_t begin_canary = %llu (%s)\n", begin_canary_,
       begin_canary_ != CANARY_POISON ? "ERROR" : "Ok"
       );
-  fflush(stdout);
+  std::fflush(stdout);
   std::printf(
       "    size_t size_ = %llu (%s)\n", size_, size_ >= storage_size ?
       (size_ == storage_size ? "Full" : "OVERFLOW") : "Ok"
       );
-  fflush(stdout);
+  std::fflush(stdout);
   std::printf(
-      "    char[] char_buffer_[%llu] [%p] =\n", storage_size, &char_buffer_
+      "    char[] buffer_[%llu] [%p] =\n", storage_size, &buffer_
       );
-  fflush(stdout);
+  std::fflush(stdout);
   for (size_t i = 0; i < size_; ++i) {
     std::printf(
-      "       *[%llu] = %s\n", i, DumpT()(
-                                 *(reinterpret_cast<const T*>(char_buffer_) + i)
-                                         ).c_str()
-      );
-    fflush(stdout);
+      "       *[%llu] = ", i);
+    DumpT()(reinterpret_cast<T*>(&buffer_)[i]);
+    if (IsPoison()) {
+      std::printf(" (POISON!)");
+    }
+    std::printf("\n");
+    std::fflush(stdout);
   }
   for (size_t i = size_; i < storage_size; ++i) {
-      printf(
-      "        [%llu] = %s (%s)\n", i, DumpT()(
-                                 *(reinterpret_cast<const T*>(char_buffer_) + i)
-                                              ).c_str(),
-      Poison<T>()() == std::string_view(
-      reinterpret_cast<const char*>(
-                                    reinterpret_cast<const T*>(char_buffer_) + i
-                                   ), sizeof(T))
-          ? "poison" : "NOT poison"
+    if (IsPoison(i)) {
+      std::printf(
+      "        [%llu] = poison (poison)\n", i
       );
-    fflush(stdout);
+    } else {
+      std::printf(
+      "        [%llu] = ");
+      if constexpr (std::is_fundamental_v<T>) {
+        DumpT()(reinterpret_cast<T*>(&buffer_)[i]);
+      } else {
+        std::printf("NOT poison");
+      }
+      std::printf(" (NOT poison)");
+   }
+   std::fflush(stdout);
   }
-  printf(
+  std::printf(
       "size_t check_sum_ = %llu (%s)\n",
-      *check_sum_, *check_sum_ != CalculateCheckSum() ? "ERROR" : "Ok"
+      check_sum_, check_sum_ != CalculateCheckSum() ? "ERROR" : "Ok"
       );
-  fflush(stdout);
-  printf(
+  std::fflush(stdout);
+  std::printf(
       "size_t end_canary = %llu (%s)\n", end_canary_,
       end_canary_ != CANARY_POISON ? "ERROR" : "Ok"
       );
-  fflush(stdout);
-  printf(
+  std::fflush(stdout);
+  std::printf(
       "}\n"
       );
-  fflush(stdout);
+  std::fflush(stdout);
+}
+
+
+/*!
+ * @brief fills object in index position with poison bytes
+ * @param index
+ */
+template<typename T,
+         typename DumpT,
+         size_t storage_size>
+void UnbreakableStack<T, Static, DumpT, storage_size>::
+    FillWithPoison(size_t index) {
+  memset(reinterpret_cast<char*>(reinterpret_cast<T*>(buffer_) + index),
+         POISON_BYTE, sizeof(T));
+}
+
+/*!
+ * @param index
+ * @return is object on index position is poison
+ */
+template<typename T, typename DumpT, size_t storage_size>
+bool UnbreakableStack<T, Static, DumpT, storage_size>::
+    IsPoison(size_t index) const noexcept {
+  const char* value_ptr =
+    reinterpret_cast<const char*>(reinterpret_cast<const T*>(buffer_) + index);
+  for (size_t i = 0; i < sizeof(T); ++i) {
+    if (value_ptr[i] != static_cast<char>(POISON_BYTE)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/*!
+ *
+ * @brief calculates hash from object casted to string
+ * @return check sum of object
+ */
+template<typename T,
+         typename DumpT,
+         size_t storage_size>
+size_t  UnbreakableStack<T, Static,DumpT, storage_size>::
+    CalculateCheckSum() noexcept {
+  size_t old_check_sum = check_sum_;
+  check_sum_ = 0;
+  size_t calculated_check_sum = reinterpret_cast<size_t>(this) +
+  std::hash<std::string_view>()(
+    std::string_view(reinterpret_cast<const char*>(this),
+                     sizeof(UnbreakableStack<T, Static, DumpT, storage_size>)));
+  check_sum_ = old_check_sum;
+
+  return calculated_check_sum;
 }
 
 #endif

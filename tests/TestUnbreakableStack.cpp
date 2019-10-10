@@ -1,7 +1,11 @@
+/*!
+ * @file Tests for UnbreakableStack class
+ */
+
 #include <gtest/gtest.h>
 #include <headers/UnbreakableStack.hpp>
 
-struct TestUnbreakableSort : ::testing::Test {
+struct TestUnbreakableStack : ::testing::Test {
  protected:
   void SetUp() override {}
   void TearDown() override {}
@@ -14,33 +18,32 @@ struct TestUnbreakableSort : ::testing::Test {
   Static, DefaultDump<std::vector<int>>, 100> vec_st;
 };
 
-TEST_F(TestUnbreakableSort, Overflow0) {
+TEST_F(TestUnbreakableStack, Overflow0) {
   for (size_t i = 0; i < 100; ++i) {
     int_st.Push(i);
   }
-  int x = 6;
   EXPECT_DEATH(int_st.Push(1), ".*");
 }
 
-TEST_F(TestUnbreakableSort, Pop0) {
+TEST_F(TestUnbreakableStack, Pop0) {
   EXPECT_DEATH(int_st.Pop(), ".*");
 }
 
-TEST_F(TestUnbreakableSort, Canary0) {
+TEST_F(TestUnbreakableStack, Canary0) {
   size_t tmp = *(size_t*)&int_st;
   *(size_t*)&int_st = 100500;
   EXPECT_FALSE(OkInt());
   *(size_t*)&int_st = tmp;
 }
 
-TEST_F(TestUnbreakableSort, Canary1) {
+TEST_F(TestUnbreakableStack, Canary1) {
   size_t tmp = *(size_t*)((char*)&int_st + sizeof(int_st) - 1);
   *(size_t*)((char*)&int_st + sizeof(int_st) - 1) = 100500;
   EXPECT_FALSE(OkInt());
   *(size_t*)((char*)&int_st + sizeof(int_st) - 1) = tmp;
 }
 
-TEST_F(TestUnbreakableSort, OutOfRange0) {
+TEST_F(TestUnbreakableStack, OutOfRange0) {
   size_t tmp = *(size_t*)((char*)&int_st + 100);
   *(size_t*)((char*)&int_st + 100) = 100500;
   EXPECT_FALSE(OkInt());

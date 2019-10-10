@@ -1,3 +1,7 @@
+/*!
+ * @file UnbreakableStackFunctions realization
+ */
+
 #include <headers/UnbreakableStackFunctions.h>
 
 char SymbolFromXDigit(unsigned char digit) {
