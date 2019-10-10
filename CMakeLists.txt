@@ -3,7 +3,7 @@ project(unbreakable_stack)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(CMAKE_CXX_FLAGS "-DTESTING -Wall")
+set(CMAKE_CXX_FLAGS "-Wall")
 
 ######
 

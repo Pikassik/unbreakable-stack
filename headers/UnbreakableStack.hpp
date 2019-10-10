@@ -104,7 +104,7 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
 
 #ifndef NDEBUG
   bool Ok() noexcept;
-  void Dump(const char* filename, int line, const char* function_name) const;
+  void Dump(const char* filename, int line, const char* function_name);
   void FillWithPoison(size_t index);
   bool IsPoison(size_t index) const noexcept ;
   size_t CalculateCheckSum() noexcept;
@@ -304,7 +304,7 @@ template<typename T,
          typename DumpT,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::
-    Dump(const char* filename, int line, const char* function_name) const {
+    Dump(const char* filename, int line, const char* function_name) {
   std::printf(
       "Ok failed! from %s (%d)\n%s:\n", filename, line, function_name
       );
@@ -344,8 +344,8 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
   for (size_t i = 0; i < size_; ++i) {
     std::printf(
       "       *[%llu] = ", i);
-    DumpT()(reinterpret_cast<T*>(&buffer_)[i]);
-    if (IsPoison()) {
+    DumpT()(reinterpret_cast<const T*>(&buffer_)[i]);
+    if (IsPoison(i)) {
       std::printf(" (POISON!)");
     }
     std::printf("\n");
@@ -360,7 +360,7 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
       std::printf(
       "        [%llu] = ");
       if constexpr (std::is_fundamental_v<T>) {
-        DumpT()(reinterpret_cast<T*>(&buffer_)[i]);
+        DumpT()(reinterpret_cast<const T*>(&buffer_)[i]);
       } else {
         std::printf("NOT poison");
       }
