@@ -339,6 +339,16 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
       );
   std::fflush(stdout);
   std::printf(
+      "    size_t check_sum_ = %llu (%s)\n",
+      check_sum_, check_sum_ != CalculateCheckSum() ? "ERROR" : "Ok"
+      );
+  std::fflush(stdout);
+  std::printf(
+      "    size_t end_canary = %llu (%s)\n", end_canary_,
+      end_canary_ != CANARY_POISON ? "ERROR" : "Ok"
+      );
+  std::fflush(stdout);
+  std::printf(
       "    char[] buffer_[%llu] [%p] =\n", storage_size, &buffer_
       );
   std::fflush(stdout);
@@ -369,16 +379,6 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
    }
    std::fflush(stdout);
   }
-  std::printf(
-      "size_t check_sum_ = %llu (%s)\n",
-      check_sum_, check_sum_ != CalculateCheckSum() ? "ERROR" : "Ok"
-      );
-  std::fflush(stdout);
-  std::printf(
-      "size_t end_canary = %llu (%s)\n", end_canary_,
-      end_canary_ != CANARY_POISON ? "ERROR" : "Ok"
-      );
-  std::fflush(stdout);
   std::printf(
       "}\n"
       );
