@@ -89,6 +89,8 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
 
   size_t Size() const noexcept;
 
+  const T& Data(size_t index) const;
+
  private:
 
 #ifndef NDEBUG
@@ -99,16 +101,16 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
   char buffer_[sizeof(T) * storage_size] = {};
 
 #ifndef NDEBUG
-  size_t check_sum_                     = 0;
+  mutable size_t check_sum_             = 0;
   size_t end_canary_                    = CANARY_POISON;
 #endif
 
 #ifndef NDEBUG
-  bool Ok() noexcept;
-  void Dump(const char* filename, int line, const char* function_name);
+  bool Ok() const;
+  void Dump(const char* filename, int line, const char* function_name) const;
   void FillWithPoison(size_t index);
-  bool IsPoison(size_t index) const noexcept ;
-  size_t CalculateCheckSum() noexcept;
+  bool IsPoison(size_t index) const;
+  size_t CalculateCheckSum() const;
 #endif
 };
 
@@ -269,6 +271,19 @@ size_t UnbreakableStack<T, Static, DumpT, storage_size>::Size() const noexcept {
   return size_;
 }
 
+template<typename T, typename DumpT, size_t storage_size>
+const T& UnbreakableStack<T,
+                          Static,
+                          DumpT,
+                          storage_size>::Data(size_t index) const {
+  VERIFIED(Ok());
+  assert(index < size_ ||
+  (({VERIFIED(false);}), false));
+
+  return reinterpret_cast<const T*>(buffer_)[index];
+}
+
+
 #ifndef NDEBUG
 
 /*!
@@ -278,7 +293,7 @@ size_t UnbreakableStack<T, Static, DumpT, storage_size>::Size() const noexcept {
 template<typename T,
          typename DumpT,
          size_t storage_size>
-bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() noexcept {
+bool UnbreakableStack<T, Static, DumpT, storage_size>::Ok() const {
 
   if (this                == nullptr)             return false;
   if (begin_canary_       != CANARY_POISON)       return false;
@@ -305,7 +320,7 @@ template<typename T,
          typename DumpT,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::
-    Dump(const char* filename, int line, const char* function_name) {
+    Dump(const char* filename, int line, const char* function_name) const {
   std::printf(
       "Ok failed! from %s (%d)\n%s:\n", filename, line, function_name
       );
@@ -405,7 +420,7 @@ void UnbreakableStack<T, Static, DumpT, storage_size>::
  */
 template<typename T, typename DumpT, size_t storage_size>
 bool UnbreakableStack<T, Static, DumpT, storage_size>::
-    IsPoison(size_t index) const noexcept {
+    IsPoison(size_t index) const {
   const char* value_ptr =
     reinterpret_cast<const char*>(reinterpret_cast<const T*>(buffer_) + index);
   for (size_t i = 0; i < sizeof(T); ++i) {
@@ -426,7 +441,7 @@ template<typename T,
          typename DumpT,
          size_t storage_size>
 size_t  UnbreakableStack<T, Static,DumpT, storage_size>::
-    CalculateCheckSum() noexcept {
+    CalculateCheckSum() const {
   size_t old_check_sum = check_sum_;
   check_sum_ = 0;
   size_t calculated_check_sum = reinterpret_cast<size_t>(this) +
@@ -439,3 +454,4 @@ size_t  UnbreakableStack<T, Static,DumpT, storage_size>::
 }
 
 #endif
+
