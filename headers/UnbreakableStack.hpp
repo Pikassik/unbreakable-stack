@@ -10,6 +10,7 @@
 #include <string>
 #include <memory>
 #include <cassert>
+#include <cstring>
 #include <type_traits>
 
 #ifndef IS_NOT_FATAL
@@ -75,6 +76,7 @@ class UnbreakableStack<T, Static, DumpT, storage_size> {
  public:
   UnbreakableStack();
   UnbreakableStack(const UnbreakableStack&) = delete;
+  UnbreakableStack& operator=(const UnbreakableStack&) = delete;
   ~UnbreakableStack();
 
   void Push(const T& value);
@@ -410,7 +412,7 @@ template<typename T,
          size_t storage_size>
 void UnbreakableStack<T, Static, DumpT, storage_size>::
     FillWithPoison(size_t index) {
-  memset(reinterpret_cast<char*>(reinterpret_cast<T*>(buffer_) + index),
+  std::memset(reinterpret_cast<char*>(reinterpret_cast<T*>(buffer_) + index),
          POISON_BYTE, sizeof(T));
 }
 
